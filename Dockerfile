@@ -52,7 +52,7 @@ ENV PATH="/opt/cronicle/bin:/opt/cronicle/minio-binaries:${PATH}" \
   LC_ALL="en_US.UTF-8" \
   CRONICLE_Storage__engine=S3 \
   CRONICLE_Storage__S3__params__Bucket=cronicle \
-  CRONICLE_Storage__AWS__endpoint=http://s3-gate.mortality.watch \
+  CRONICLE_Storage__AWS__endpoint=https://s3-gate.mortality.watch \
   CRONICLE_Storage__AWS__forcePathStyle=true \
   CRONICLE_Storage__AWS__region=us-east-1 \
   CRONICLE_Storage__AWS__credentials__secretAccessKey="${AWS_SECRET_ACCESS_KEY}" \
@@ -76,7 +76,7 @@ chown -R ubuntu:ubuntu minio-binaries
 
 # Switch to ubuntu user for MinIO setup
 USER ubuntu
-RUN minio-binaries/mc alias set minio http://s3-gate.mortality.watch \ 
+RUN minio-binaries/mc alias set minio https://s3-gate.mortality.watch \ 
 minio $AWS_SECRET_ACCESS_KEY
 
 # Expose Cronicle Manager Port
