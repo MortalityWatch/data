@@ -41,6 +41,18 @@ rm(
 priority_weekly <- c(3, 2, 1) # Prefer 3, then 2, then 1
 priority_monthly <- c(2, 3, 1) # Prefer 2, then 3, then 1
 priority_yearly <- c(1, 2, 3) # Prefer 1, then 2, then 3
+
+# Minimum source type required for each output resolution
+# Type 3 = weekly, Type 2 = monthly, Type 1 = yearly
+# This prevents interpolation artifacts (e.g., yearly LE appearing in weekly output)
+min_type_for_output <- c(
+  "yearweek" = 3,    # Weekly output requires weekly source
+  "yearmonth" = 2,   # Monthly output requires monthly or weekly source
+  "yearquarter" = 2, # Quarterly output requires monthly or weekly source
+  "year" = 1,        # Yearly output accepts any source
+  "fluseason" = 2,   # Flu season requires monthly or weekly source
+  "midyear" = 2      # Midyear requires monthly or weekly source
+)
 priority_dataset <- c(
   "cdc", "statcan", "destatis", "eurostat", "world_mortality", "mortality_org",
   "un"
@@ -64,8 +76,10 @@ save_info(
 rm(iso3c_jurisdiction)
 
 # Function to select the correct row per date based on priority order
-filter_by_priority <- function(data, priority_order) {
+# min_type: optional minimum source type required (filters out lower resolution data)
+filter_by_priority <- function(data, priority_order, min_type = 1) {
   data |>
+    filter(type >= min_type) |>
     group_by(date, age_group) |>
     # Arrange by the given priority order
     arrange(match(source, priority_dataset), match(type, priority_order)) |>
@@ -122,17 +136,20 @@ process_country <- function(df) {
   }
 
   # Apply filtering to both datasets
+  # For "all" ages (deaths/population only), no min_type needed
   dd_all_weekly <- filter_by_priority(dd_all, priority_weekly)
   dd_all_monthly <- filter_by_priority(dd_all, priority_monthly)
   dd_all_yearly <- filter_by_priority(dd_all, priority_yearly)
 
-  dd_asmr_weekly <- filter_by_priority(dd_asmr, priority_weekly)
-  dd_asmr_monthly <- filter_by_priority(dd_asmr, priority_monthly)
-  dd_asmr_yearly <- filter_by_priority(dd_asmr, priority_yearly)
+  # For ASMR/LE data, apply min_type to prevent interpolation artifacts
+  dd_asmr_weekly <- filter_by_priority(dd_asmr, priority_weekly, min_type_for_output["yearweek"])
+  dd_asmr_monthly <- filter_by_priority(dd_asmr, priority_monthly, min_type_for_output["yearmonth"])
+  dd_asmr_yearly <- filter_by_priority(dd_asmr, priority_yearly, min_type_for_output["year"])
 
-  dd_age_weekly <- filter_by_priority(dd_age, priority_weekly)
-  dd_age_monthly <- filter_by_priority(dd_age, priority_monthly)
-  dd_age_yearly <- filter_by_priority(dd_age, priority_yearly)
+  # For age-specific data (includes LE), apply min_type
+  dd_age_weekly <- filter_by_priority(dd_age, priority_weekly, min_type_for_output["yearweek"])
+  dd_age_monthly <- filter_by_priority(dd_age, priority_monthly, min_type_for_output["yearmonth"])
+  dd_age_yearly <- filter_by_priority(dd_age, priority_yearly, min_type_for_output["year"])
 
   for (ag in unique(dd$age_group)) {
     print(paste0("Age Group: ", ag))
