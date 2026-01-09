@@ -165,6 +165,9 @@ summarize_data_all <- function(dd_all, dd_asmr, type) {
 }
 
 summarize_data_by_time <- function(df, type) {
+  if (nrow(df) == 0) {
+    return(df)
+  }
   fun <- get(type)
   result <- df |>
     mutate(!!type := fun(date), .after = date) |>
