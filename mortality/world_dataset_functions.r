@@ -60,6 +60,7 @@ aggregate_data <- function(data, type) {
   }
 
   if ("asmr_who" %in% names(data)) {
+    has_source_le <- "source_le" %in% names(data)
     if (has_le) {
       result <- result |>
         summarise(
@@ -69,10 +70,11 @@ aggregate_data <- function(data, type) {
           asmr_country = round(sum_if_not_empty(.data$asmr_country), digits = 1),
           le = round(mean(.data$le, na.rm = TRUE), 2),
           source_asmr = toString(unique(.data$source)),
+          source_le = if (has_source_le) toString(unique(.data$source_le)) else NA_character_,
           .groups = "drop"
         )
       if (all(is.na(result$le) | is.nan(result$le))) {
-        result <- result |> select(-le)
+        result <- result |> select(-le, -source_le)
       }
     } else {
       result <- result |>
