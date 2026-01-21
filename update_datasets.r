@@ -40,7 +40,7 @@ urls <- list(
     "eurostat_fertility.tsv.gz"
   ),
   c(
-    "https://mortality.org/File/GetDocument/Public/STMF/Outputs/stmf.csv",
+    "https://apify.mortality.watch/mortality-org-stmf.csv",
     "mortality_org.csv"
   ),
   c(
