@@ -24,6 +24,9 @@ RUN apt-get update && apt-get install -y r-base r-base-dev
 COPY dependencies_r.txt install_r_deps.sh .
 RUN chmod +x install_r_deps.sh && ./install_r_deps.sh
 
+# Pin vroom to 1.6.7 to avoid breaking change in 1.7.0
+RUN Rscript -e "install.packages('remotes'); remotes::install_version('vroom', '1.6.7', repos='https://cloud.r-project.org/')"
+
 # Install Node.js (as root)
 ENV NODE_VERSION="22.x"
 RUN curl -fsSL https://deb.nodesource.com/setup_${NODE_VERSION} | bash -
