@@ -122,6 +122,15 @@ calc_sma <- function(data, n) {
     data$asmr_usa <- round(sma(data$asmr_usa, n = n), 3)
     data$asmr_country <- round(sma(data$asmr_country, n = n), 3)
   }
+  if ("population" %in% colnames(data)) {
+    data$population <- round(sma(data$population, n = n))
+  }
+  if ("le" %in% colnames(data)) {
+    data$le <- round(sma(data$le, n = n), 2)
+  }
+  if ("le_adj" %in% colnames(data)) {
+    data$le_adj <- round(sma(data$le_adj, n = n), 2)
+  }
   data
 }
 
