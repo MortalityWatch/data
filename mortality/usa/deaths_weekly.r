@@ -30,14 +30,12 @@ parse_data <- function(df, jurisdiction_column, age_group) {
   }
 }
 
-get_csv <- function(j, y, a) {
-  parse_data(
-    read_delim(paste0(
-      "../wonder_dl/data_wonder/weekly/", j, "_", a, "_", y, ".txt"
-    ), delim = "\t", col_types = cols(.default = "c")),
-    ifelse(j == "usa", "", ifelse(y == "2018-n", "Residence State", "State")),
-    a
-  )
+get_csv <- function(j, a) {
+  files <- Sys.glob(paste0("../wonder_dl/data_wonder/weekly/", j, "_", a, "_*.txt"))
+  df <- bind_rows(lapply(files, function(f) {
+    read_delim(f, delim = "\t", col_types = cols(.default = "c"))
+  }))
+  parse_data(df, ifelse(j == "usa", "", "Residence State"), a)
 }
 
 us_states_iso3c <- read_csv("./data_static/usa_states_iso3c.csv")
@@ -49,11 +47,10 @@ five_year_age_groups <- c(
 )
 
 df_result <- tibble()
-y <- "2018-n"
 for (j in c("usa", "usa-state")) {
-  df_all <- get_csv(j, y, "all")
+  df_all <- get_csv(j, "all")
   # First calculate NS
-  df_ns <- get_csv(j, y, "NS") |>
+  df_ns <- get_csv(j, "NS") |>
     inner_join(df_all |> select(iso3c, year, week, deaths),
       by = join_by(iso3c, year, week)
     ) |>
@@ -63,7 +60,7 @@ for (j in c("usa", "usa-state")) {
 
   # Then all age_groups
   for (ag in c(five_year_age_groups)) {
-    df <- get_csv(j, y, ag) |>
+    df <- get_csv(j, ag) |>
       inner_join(df_all |> select(iso3c, year, week, deaths),
         by = join_by(iso3c, year, week)
       ) |>
