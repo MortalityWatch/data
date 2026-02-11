@@ -30,13 +30,10 @@ parse_data <- function(df, jurisdiction_column, age_group) {
   }
 }
 
-year_tranches <- c("2018-2020", "2021-2023", "2024-2026")
-
 get_csv <- function(j, a) {
-  df <- bind_rows(lapply(year_tranches, function(y) {
-    read_delim(paste0(
-      "../wonder_dl/data_wonder/weekly/", j, "_", a, "_", y, ".txt"
-    ), delim = "\t", col_types = cols(.default = "c"))
+  files <- Sys.glob(paste0("../wonder_dl/data_wonder/weekly/", j, "_", a, "_*.txt"))
+  df <- bind_rows(lapply(files, function(f) {
+    read_delim(f, delim = "\t", col_types = cols(.default = "c"))
   }))
   parse_data(df, ifelse(j == "usa", "", "Residence State"), a)
 }
