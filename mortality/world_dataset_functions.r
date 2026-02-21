@@ -578,6 +578,49 @@ fill_gaps_na <- function(df) {
 }
 
 save_info <- function(df, upload) {
+  parse_age_group_start <- function(age_group) {
+    ag <- trimws(age_group)
+    m <- regmatches(ag, regexpr("^[0-9]+", ag))
+    if (length(m) == 0 || m == "") {
+      return(Inf)
+    }
+    as.numeric(m)
+  }
+
+  canonicalize_age_groups <- function(age_groups) {
+    ag <- unique(trimws(age_groups))
+    ag <- ag[!is.na(ag) & ag != ""]
+    has_all <- any(tolower(ag) == "all")
+    bins <- ag[tolower(ag) != "all"]
+
+    if (length(bins) > 0) {
+      bins <- bins[order(vapply(bins, parse_age_group_start, numeric(1)), bins)]
+    }
+
+    age_groups_bins <- paste(bins, collapse = ", ")
+    age_groups_canonical <- if (has_all) {
+      if (nzchar(age_groups_bins)) {
+        paste0("all, ", age_groups_bins)
+      } else {
+        "all"
+      }
+    } else {
+      age_groups_bins
+    }
+    bin_schema_id <- if (length(bins) == 0) {
+      "all"
+    } else {
+      gsub("[^0-9a-z]+", "_", tolower(age_groups_bins))
+    }
+
+    list(
+      age_groups_bins = age_groups_bins,
+      age_groups_canonical = age_groups_canonical,
+      n_age_groups_meta = length(bins),
+      bin_schema_id = bin_schema_id
+    )
+  }
+
   result <- tibble()
   for (code in unique(df$iso3c)) {
     df_country <- df |> filter(.data$iso3c == code)
@@ -585,6 +628,7 @@ save_info <- function(df, upload) {
       df_country_type <- df_country |> filter(.data$type == t)
       for (s in unique(df_country_type$source)) {
         df_country_type_source <- df_country_type |> filter(.data$source == s)
+        age_meta <- canonicalize_age_groups(unique(df_country_type_source$age_group))
         result <- rbind(
           result,
           tibble(
@@ -597,7 +641,12 @@ save_info <- function(df, upload) {
             age_groups = paste(
               unique(df_country_type_source$age_group),
               collapse = ", "
-            )
+            ),
+            age_groups_bins = age_meta$age_groups_bins,
+            age_groups_canonical = age_meta$age_groups_canonical,
+            n_age_groups_meta = age_meta$n_age_groups_meta,
+            bin_schema_id = age_meta$bin_schema_id,
+            le_bin_bias_adj_years = get_le_bin_bias(age_meta$n_age_groups_meta)
           )
         )
       }
