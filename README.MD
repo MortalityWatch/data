@@ -29,8 +29,8 @@ Dokku config:
 ```
 dokku config:set cronicle AWS_ACCESS_KEY_ID=minio \ 
 AWS_DEFAULT_REGION=s3 \ 
-AWS_S3_ENDPOINT=mortality.watch \ 
 AWS_SECRET_ACCESS_KEY=your_secret_access_key_here \ 
+GITHUB_TOKEN=your_github_pat_here \ 
 CRONICLE_job_memory_max=0 \ 
 CRONICLE_smtp_hostname=smtp-relay.sendinblue.com \ 
 CRONICLE_smtp_port=587 \ 
@@ -45,7 +45,7 @@ Each cronicle job is setup like this:
 ```sh
 #!/usr/bin/env bash
 
-[ ! -d \"charts\" ] && git clone https://github.com/USMortality/charts.git
+[ ! -d \"charts\" ] && git clone https://x-access-token:${GITHUB_TOKEN}@github.com/USMortality/charts.git
 cd charts
 git fetch
 git reset origin/master --hard
