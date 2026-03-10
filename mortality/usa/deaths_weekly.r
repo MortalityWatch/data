@@ -33,7 +33,9 @@ parse_data <- function(df, jurisdiction_column, age_group) {
 get_csv <- function(j, a) {
   files <- Sys.glob(paste0("../wonder_dl/data_wonder/weekly/", j, "_", a, "_*.txt"))
   df <- bind_rows(lapply(files, function(f) {
-    read_delim(f, delim = "\t", col_types = cols(.default = "c"))
+    suppressWarnings(
+      read_delim(f, delim = "\t", col_types = cols(.default = "c"))
+    )
   }))
   parse_data(df, ifelse(j == "usa", "", "Residence State"), a)
 }
