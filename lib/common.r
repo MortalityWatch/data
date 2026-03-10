@@ -224,7 +224,7 @@ read_remote <- function(path) {
       response <- GET(url)
       stop_for_status(response)
       content <- content(response, "text")
-      read_csv(content, show_col_types = FALSE)
+      read_csv(I(content), show_col_types = FALSE)
     },
     error = function(e) {
       message("Error reading: ", url)
