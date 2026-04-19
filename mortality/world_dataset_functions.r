@@ -19,6 +19,13 @@ filter_by_complete_temp_values <- function(data, fun_name, n) {
     group_by(across(all_of(c("iso3c", fun_name))))
 }
 
+# Aggregate the per-period le_warning flag. A period is flagged when at least
+# one daily input row carried le_warning == TRUE; NAs are ignored and a fully
+# NA period stays NA.
+agg_le_warning <- function(x) {
+  if (length(x) == 0 || all(is.na(x))) NA else any(x, na.rm = TRUE)
+}
+
 aggregate_data <- function(data, type) {
   # Filter ends
   result <- switch(type,
@@ -30,6 +37,7 @@ aggregate_data <- function(data, type) {
     "midyear" = filter_by_complete_temp_values(data, type, 365)
   )
   has_le <- "le" %in% names(data)
+  has_le_warning <- "le_warning" %in% names(data)
 
   if ("cmr" %in% names(data)) {
     if (has_le) {
@@ -39,12 +47,17 @@ aggregate_data <- function(data, type) {
           population = round(mean(.data$population)),
           cmr = round(sum_if_not_empty(.data$cmr), digits = 1),
           le = round(mean(.data$le, na.rm = TRUE), 2),
+          le_warning = if (has_le_warning) {
+            agg_le_warning(.data$le_warning)
+          } else {
+            NA
+          },
           type = toString(unique(.data$type)),
           source = toString(unique(.data$source)),
           .groups = "drop"
         )
       if (all(is.na(result$le) | is.nan(result$le))) {
-        result <- result |> select(-le)
+        result <- result |> select(-le, -le_warning)
       }
     } else {
       result <- result |>
@@ -69,12 +82,17 @@ aggregate_data <- function(data, type) {
           asmr_usa = round(sum_if_not_empty(.data$asmr_usa), digits = 1),
           asmr_country = round(sum_if_not_empty(.data$asmr_country), digits = 1),
           le = round(mean(.data$le, na.rm = TRUE), 2),
+          le_warning = if (has_le_warning) {
+            agg_le_warning(.data$le_warning)
+          } else {
+            NA
+          },
           source_asmr = toString(unique(.data$source)),
           source_le = if (has_source_le) toString(unique(.data$source_le)) else NA_character_,
           .groups = "drop"
         )
       if (all(is.na(result$le) | is.nan(result$le))) {
-        result <- result |> select(-le, -source_le)
+        result <- result |> select(-le, -le_warning, -source_le)
       }
     } else {
       result <- result |>
@@ -130,6 +148,19 @@ calc_sma <- function(data, n) {
   }
   if ("le_adj" %in% colnames(data)) {
     data$le_adj <- round(sma(data$le_adj, n = n), 2)
+  }
+  if ("le_warning" %in% colnames(data)) {
+    # Rolling-OR: a smoothed point inherits the warning if any input in the
+    # window came from a low-resolution source. Aligns with the SMA window.
+    flag <- data$le_warning
+    out <- rep(NA, length(flag))
+    if (length(flag) >= n) {
+      for (i in n:length(flag)) {
+        win <- flag[(i - n + 1):i]
+        out[i] <- if (all(is.na(win))) NA else any(win, na.rm = TRUE)
+      }
+    }
+    data$le_warning <- out
   }
   data
 }

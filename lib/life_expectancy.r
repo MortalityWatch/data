@@ -24,6 +24,9 @@
 # - First age group width <= 15 years (0-4, 0-9, or 0-14)
 # - Open-ended terminal age group (80+, 85+, 90+)
 # - Complete age coverage (no gaps)
+# Sources with a broader first age group still produce an estimate via the
+# n / 3 nax fallback, but the row carries `le_warning = TRUE` so the frontend
+# can mark it as reduced accuracy.
 #
 # References:
 # - Chiang, C.L. (1984). The Life Table and Its Applications
@@ -32,8 +35,11 @@
 # - Coale, A.J. & Demeny, P. (1966). Regional Model Life Tables and Stable
 #   Populations
 
-# Maximum width of first age group for reliable LE calculation
-# Groups broader than this (e.g., 0-24, 0-44) are too heterogeneous
+# Maximum width of first age group for reliable LE calculation.
+# Groups broader than this (e.g., 0-24, 0-44, 0-64) are too heterogeneous to
+# produce a fully accurate first-bucket nax estimate. We still compute LE for
+# such inputs (estimate_nax() falls back to n / 3), but the row is flagged via
+# `le_warning = TRUE` so the frontend can surface a "reduced accuracy" note.
 MAX_FIRST_AGE_GROUP_WIDTH <- 15
 
 #' Estimate nax (average years lived in interval by those who die)
@@ -97,9 +103,9 @@ estimate_nax <- function(nMx, ages, AgeInt, sex = "t") {
         nax[i] <- 0.65 * a0 + 0.20 * (1 + 1.5) + 0.15 * (5 + 5)
 
       } else {
-        # Broader than 0-14: fallback for direct calls to estimate_nax()
-        # Note: calculate_le_all_ages() and calculate_e0() return NA for these
-        # cases before reaching here, so this only applies to direct usage
+        # Broader than 0-14 (e.g. Brandenburg's 0-64): coarse fallback. Result
+        # is approximate, so calculate_le_all_ages() flags the output row with
+        # `le_warning = TRUE` and the frontend renders a reduced-accuracy note.
         nax[i] <- n / 3
       }
 
@@ -250,12 +256,10 @@ calculate_e0 <- function(df, sex = "t", annualize = TRUE) {
   AgeInt <- age_info$intervals[ord]
   nMx <- nMx[ord]
 
-  # Skip if first age group is too broad for reliable LE calculation
-  if (ages[1] == 0 && !is.na(AgeInt[1]) && AgeInt[1] > MAX_FIRST_AGE_GROUP_WIDTH) {
-    return(NA_real_)
-  }
-
-  # Build life table
+  # Sources whose first age group is broader than MAX_FIRST_AGE_GROUP_WIDTH
+  # (e.g. Brandenburg's 0-64) still get an estimate via the n / 3 fallback in
+  # estimate_nax(); calculate_le_all_ages() flags the row separately so the
+  # frontend can show a reduced-accuracy note.
   lt <- tryCatch(
     chiang_life_table(nMx, ages, AgeInt, sex),
     error = function(e) NULL
@@ -332,18 +336,27 @@ parse_age_groups_for_le <- function(age_groups) {
 #'   Deaths should be daily counts (annual deaths / 365) when annualize=TRUE.
 #' @param annualize Logical: if TRUE (default), multiply mortality rates by 365
 #'   to convert daily rates to annual rates. Set to FALSE for annual data.
-#' @return Data frame with age_group and le columns
+#' @return Data frame with age_group, le, and le_warning columns. `le_warning`
+#'   is TRUE when the source's first age group is broader than
+#'   MAX_FIRST_AGE_GROUP_WIDTH (e.g. Brandenburg's 0-64) and the first-bucket
+#'   nax therefore relies on a coarse n / 3 fallback.
 calculate_le_all_ages <- function(df, annualize = TRUE) {
+  empty_result <- tibble(
+    age_group = character(),
+    le = numeric(),
+    le_warning = logical()
+  )
+
   # Need at least some data
   if (nrow(df) == 0) {
-    return(tibble(age_group = character(), le = numeric()))
+    return(empty_result)
   }
 
   # Parse age groups to get numeric starts
   age_info <- parse_age_groups_for_le(df$age_group)
 
   if (is.null(age_info) || length(age_info$ages) < 2) {
-    return(tibble(age_group = character(), le = numeric()))
+    return(empty_result)
   }
 
   # Calculate mortality rates (deaths per person, NOT per 100k)
@@ -354,7 +367,7 @@ calculate_le_all_ages <- function(df, annualize = TRUE) {
 
   # Check if all mortality rates are zero (no deaths)
   if (all(nMx == 0)) {
-    return(tibble(age_group = character(), le = numeric()))
+    return(empty_result)
   }
 
   # Annualize daily mortality rates to get annual rates for life table
@@ -369,11 +382,13 @@ calculate_le_all_ages <- function(df, annualize = TRUE) {
   nMx <- nMx[ord]
   age_groups_sorted <- df$age_group[ord]
 
-  # Skip if first age group is too broad for reliable LE calculation
-  # (e.g., 0-24, 0-44, 0-64 from some data sources)
-  if (ages[1] == 0 && !is.na(AgeInt[1]) && AgeInt[1] > MAX_FIRST_AGE_GROUP_WIDTH) {
-    return(tibble(age_group = character(), le = numeric()))
-  }
+  # Flag sources with a broad first age group (e.g., 0-24, 0-44, 0-64).
+  # estimate_nax() falls back to n / 3 for these, so the math still runs but
+  # the first-bucket nax is approximate. The frontend uses this flag to render
+  # a "reduced accuracy" note rather than dropping the series entirely.
+  le_warning <- ages[1] == 0 &&
+    !is.na(AgeInt[1]) &&
+    AgeInt[1] > MAX_FIRST_AGE_GROUP_WIDTH
 
   # Build life table
   lt <- tryCatch(
@@ -382,7 +397,7 @@ calculate_le_all_ages <- function(df, annualize = TRUE) {
   )
 
   if (is.null(lt)) {
-    return(tibble(age_group = character(), le = numeric()))
+    return(empty_result)
   }
 
   # Return ex for all ages
@@ -391,6 +406,7 @@ calculate_le_all_ages <- function(df, annualize = TRUE) {
 
   tibble(
     age_group = age_groups_sorted,
-    le = round(ex, 2)
+    le = round(ex, 2),
+    le_warning = le_warning
   )
 }

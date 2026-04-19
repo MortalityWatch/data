@@ -121,17 +121,19 @@ process_country <- function(df) {
       group_by(iso3c, date, type, source) |>
       slice(1) |>
       ungroup() |>
-      select(iso3c, date, type, source, n_age_groups, le)
+      select(iso3c, date, type, source, n_age_groups, le, le_warning)
 
-    # Pick best LE per date (prefer non-NA with highest n_age_groups)
-    # This allows using eurostat LE even when destatis is preferred for deaths
+    # Pick best LE per date (prefer non-NA with highest n_age_groups).
+    # Sorting by n_age_groups desc also pushes broad-first-bucket sources
+    # (le_warning == TRUE) to the back when a finer source is available.
+    # This allows using eurostat LE even when destatis is preferred for deaths.
     dd_le_best <- dd_le_e0 |>
       filter(!is.na(le)) |>
       group_by(iso3c, date) |>
       arrange(desc(n_age_groups)) |>
       slice(1) |>
       ungroup() |>
-      select(iso3c, date, le, source_le = source)
+      select(iso3c, date, le, le_warning, source_le = source)
 
     # Merge best LE into ASMR data (not requiring source match)
     dd_asmr <- dd_asmr |>
@@ -140,7 +142,8 @@ process_country <- function(df) {
     # Merge LE into age-specific data (for individual age group outputs)
     dd_age <- dd_age |>
       left_join(
-        dd_le_all |> select(iso3c, date, type, source, age_group, le),
+        dd_le_all |>
+          select(iso3c, date, type, source, age_group, le, le_warning),
         by = c("iso3c", "date", "type", "source", "age_group")
       )
   }
