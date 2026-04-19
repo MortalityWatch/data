@@ -1,9 +1,34 @@
-filter_by_complete_temp_values <- function(data, fun_name, n) {
+# Keep head/tail periods only when they have enough daily rows to be considered
+# complete. `n` is the standard threshold; `n_iso_week` (optional) is a relaxed
+# threshold that applies when every row of the head/tail period was sourced
+# from ISO weekly data (type == 3). ISO weeks straddle calendar-year
+# boundaries, so a fully-published ISO year (W01..W52/W53) covers ~362
+# calendar days of the nominal year — it never reaches the 365-day threshold
+# even when the source is complete (see issue #18).
+filter_by_complete_temp_values <- function(data, fun_name, n, n_iso_week = n) {
+  keep_period <- function(df) {
+    if (nrow(df) >= n) {
+      return(TRUE)
+    }
+    if ("type" %in% names(df) && all(df$type == 3) && nrow(df) >= n_iso_week) {
+      return(TRUE)
+    }
+    FALSE
+  }
+
+  filter_edge <- function(df) {
+    if (nrow(df) == 0) {
+      return(df)
+    }
+    df |>
+      group_by(across(all_of(fun_name))) |>
+      group_modify(~ if (keep_period(.x)) .x else .x[0, ]) |>
+      ungroup()
+  }
+
   start <- data |>
     filter(.data[[fun_name]] == head(data[[fun_name]], n = 1)) |>
-    group_by(across(all_of(fun_name))) |>
-    filter(n() >= n) |>
-    ungroup()
+    filter_edge()
   mid <- data |>
     filter(!.data[[fun_name]] %in% c(
       head(data, n = 1)[[fun_name]],
@@ -11,21 +36,23 @@ filter_by_complete_temp_values <- function(data, fun_name, n) {
     ))
   end <- data |>
     filter(.data[[fun_name]] == tail(data, n = 1)[[fun_name]]) |>
-    group_by(across(all_of(fun_name))) |>
-    filter(n() >= n) |>
-    ungroup()
+    filter_edge()
 
   rbind(start, mid, end) |>
     group_by(across(all_of(c("iso3c", fun_name))))
 }
 
 aggregate_data <- function(data, type) {
-  # Filter ends
+  # Filter ends. For "year", allow ISO-weekly-sourced years (type == 3) to
+  # pass at >= 51 weeks (357 days) since ISO weeks cannot cover all 365
+  # calendar days of a year (issue #18). fluseason / midyear keep the strict
+  # 365-day threshold for now — their boundaries don't line up with ISO
+  # week 1, so the same relaxation isn't obviously safe there.
   result <- switch(type,
     "yearweek" = filter_by_complete_temp_values(data, type, 7),
     "yearmonth" = filter_by_complete_temp_values(data, type, 28),
     "yearquarter" = filter_by_complete_temp_values(data, type, 90),
-    "year" = filter_by_complete_temp_values(data, type, 365),
+    "year" = filter_by_complete_temp_values(data, type, 365, n_iso_week = 357),
     "fluseason" = filter_by_complete_temp_values(data, type, 365),
     "midyear" = filter_by_complete_temp_values(data, type, 365)
   )
