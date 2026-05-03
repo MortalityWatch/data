@@ -96,6 +96,12 @@ process_country <- function(df) {
   yearweek <- yearweek
   dd <- df |>
     expand_daily() |>
+    # Drop daily rows whose source-period total deaths is implausibly low vs.
+    # neighbours of the same series — e.g. CDC's near-empty Feb 2025 monthly
+    # bucket that otherwise wins the priority race against mortality.org's
+    # complete row and produces deaths=3927 / cmr=1.1 in the published
+    # monthly output (issue #17).
+    filter_anomalous_periods() |>
     mutate(cmr = deaths / population * 100000)
 
   dd_all <- dd |> filter(age_group == "all")
@@ -124,14 +130,18 @@ process_country <- function(df) {
       select(iso3c, date, type, source, n_age_groups, le)
 
     # Pick best LE per date (prefer non-NA with highest n_age_groups)
-    # This allows using eurostat LE even when destatis is preferred for deaths
+    # This allows using eurostat LE even when destatis is preferred for deaths.
+    # Also retain the LE source's `type` (1=yearly, 2=monthly, 3=weekly) as
+    # `le_source_type` so downstream period aggregation can detect when the
+    # default mean(le) would be averaging sub-yearly single-period LE values
+    # (issue #17 / #16).
     dd_le_best <- dd_le_e0 |>
       filter(!is.na(le)) |>
       group_by(iso3c, date) |>
       arrange(desc(n_age_groups)) |>
       slice(1) |>
       ungroup() |>
-      select(iso3c, date, le, source_le = source)
+      select(iso3c, date, le, source_le = source, le_source_type = type)
 
     # Merge best LE into ASMR data (not requiring source match)
     dd_asmr <- dd_asmr |>
@@ -142,6 +152,12 @@ process_country <- function(df) {
       left_join(
         dd_le_all |> select(iso3c, date, type, source, age_group, le),
         by = c("iso3c", "date", "type", "source", "age_group")
+      ) |>
+      # Attach the LE-source type so age-level outputs can also recompute
+      # yearly LE rather than averaging sub-yearly source LEs.
+      left_join(
+        dd_le_best |> select(iso3c, date, le_source_type),
+        by = c("iso3c", "date")
       )
   }
 
@@ -161,9 +177,33 @@ process_country <- function(df) {
   dd_age_monthly <- filter_by_priority(dd_age, priority_monthly, min_type_for_output["yearmonth"])
   dd_age_yearly <- filter_by_priority(dd_age, priority_yearly, min_type_for_output["year"])
 
+  # Recompute period-level LE from annual age-stratified mortality for the
+  # three aggregations whose default mean(le) is structurally wrong when the
+  # underlying LE source is sub-yearly (issue #17 also fixes #16).
+  # `dd_age_yearly` feeds the "year" aggregation; "fluseason" and "midyear"
+  # are aggregated from the monthly age data (mirroring summarize_data_all
+  # below at lines using dd_*_monthly for those types).
+  recomp_le_yearly    <- recompute_period_le(dd_age_yearly,  "year")
+  recomp_le_fluseason <- recompute_period_le(dd_age_monthly, "fluseason")
+  recomp_le_midyear   <- recompute_period_le(dd_age_monthly, "midyear")
+
   for (ag in unique(dd$age_group)) {
     print(paste0("Age Group: ", ag))
     if (ag == "all") {
+      # For year / fluseason / midyear, override the default mean(le)
+      # aggregation with LE recomputed from annual age-stratified mortality
+      # whenever the underlying LE source is sub-yearly. See issue #17 / #16
+      # and recompute_period_le() docstring for why this is necessary.
+      yearly_agg <- summarize_data_all(dd_all_yearly, dd_asmr_yearly,
+          type = "year") |>
+        override_le_with_recomputed(recomp_le_yearly)
+      fluseason_agg <- summarize_data_all(dd_all_monthly, dd_asmr_monthly,
+          type = "fluseason") |>
+        override_le_with_recomputed(recomp_le_fluseason)
+      midyear_agg <- summarize_data_all(dd_all_monthly, dd_asmr_monthly,
+          type = "midyear") |>
+        override_le_with_recomputed(recomp_le_midyear)
+
       write_dataset(
         iso3c, ag,
         weekly = summarize_data_all(dd_all_weekly, dd_asmr_weekly,
@@ -175,15 +215,9 @@ process_country <- function(df) {
         quarterly = summarize_data_all(dd_all_monthly, dd_asmr_monthly,
           type = "yearquarter"
         ),
-        yearly = summarize_data_all(dd_all_yearly, dd_asmr_yearly,
-          type = "year"
-        ),
-        by_fluseason = summarize_data_all(dd_all_monthly, dd_asmr_monthly,
-          type = "fluseason"
-        ),
-        by_midyear = summarize_data_all(dd_all_monthly, dd_asmr_monthly,
-          type = "midyear"
-        )
+        yearly = yearly_agg,
+        by_fluseason = fluseason_agg,
+        by_midyear = midyear_agg
       )
     } else {
       dd_ag_f_weekly <- dd_age_weekly |>

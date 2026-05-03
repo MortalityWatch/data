@@ -1,3 +1,221 @@
+# Drop daily rows belonging to a (iso3c, source, age_group, type) source-period
+# whose total deaths is implausibly low compared to neighbouring periods of the
+# same series. This catches partial / sentinel rows that a publisher emits at
+# the leading edge of their data (e.g. CDC publishing an essentially empty
+# Feb 2025 monthly bucket which then wins the priority race against
+# mortality.org's complete row — see issue #17).
+#
+# The rule is data-shape-driven, not country-specific: for each source-period,
+# compare its total deaths against the median of up to `window` neighbouring
+# periods of the same series (excluding self). Drop the period if its total is
+# below `min_ratio` of that neighbour median (and the median is non-trivial).
+filter_anomalous_periods <- function(
+    dd,
+    window = 12,
+    min_ratio = 0.2,
+    min_neighbour_median = 100) {
+  if (nrow(dd) == 0) return(dd)
+  if (!all(c("type", "source", "age_group", "deaths") %in% names(dd))) {
+    return(dd)
+  }
+
+  # Source-native period id per row
+  dd_marked <- dd |>
+    mutate(period_id = case_when(
+      .data$type == 3 ~ as.character(tsibble::yearweek(.data$date)),
+      .data$type == 2 ~ as.character(tsibble::yearmonth(.data$date)),
+      TRUE            ~ as.character(year(.data$date))
+    ))
+
+  # Recover the original source-row total deaths by summing the daily rows
+  # produced by expand_daily() for each source-period.
+  totals <- dd_marked |>
+    group_by(.data$iso3c, .data$source, .data$age_group, .data$type, .data$period_id) |>
+    summarise(period_deaths = sum(.data$deaths, na.rm = TRUE), .groups = "drop") |>
+    arrange(.data$iso3c, .data$source, .data$age_group, .data$type, .data$period_id)
+
+  # For each row: median of up to `window` surrounding rows of the same series
+  # (centred, excluding self). Uses base R rather than zoo::rollapply to avoid
+  # leading/trailing NA blocks at the edges where we most need the check.
+  totals <- totals |>
+    group_by(.data$iso3c, .data$source, .data$age_group, .data$type) |>
+    mutate(neighbour_median = neighbour_median_excluding_self(.data$period_deaths, window)) |>
+    ungroup()
+
+  # Only flag rows that are (a) far below their neighbours' median AND
+  # (b) belong to a series with non-trivial volume — Poisson noise alone can
+  # drop a tiny series (e.g. <100 deaths/month) below 20 % of its median,
+  # so we don't second-guess publishers in that regime.
+  bad <- totals |>
+    filter(
+      !is.na(.data$neighbour_median),
+      .data$neighbour_median >= min_neighbour_median,
+      .data$period_deaths < min_ratio * .data$neighbour_median
+    )
+
+  if (nrow(bad) > 0) {
+    bad |>
+      mutate(msg = sprintf(
+        "[filter_anomalous_periods] dropping %s/%s/%s type=%s %s: deaths=%g vs neighbour median=%g",
+        .data$iso3c, .data$source, .data$age_group, .data$type,
+        .data$period_id, .data$period_deaths, .data$neighbour_median
+      )) |>
+      pull("msg") |>
+      walk(message)
+  }
+
+  dd_marked |>
+    anti_join(
+      bad |> select("iso3c", "source", "age_group", "type", "period_id"),
+      by = c("iso3c", "source", "age_group", "type", "period_id")
+    ) |>
+    select(-"period_id")
+}
+
+# Median of up to `window` neighbours centred on each position, excluding self.
+# Falls back to the median of whatever neighbours exist (so edge positions still
+# get a check), and returns NA only when there are zero neighbours.
+neighbour_median_excluding_self <- function(x, window) {
+  n <- length(x)
+  half <- window %/% 2
+  vapply(seq_len(n), function(i) {
+    lo <- max(1, i - half)
+    hi <- min(n, i + half)
+    others <- x[setdiff(lo:hi, i)]
+    if (length(others) == 0) return(NA_real_)
+    median(others, na.rm = TRUE)
+  }, numeric(1))
+}
+
+# Recompute period-level (yearly / fluseason / midyear) life expectancy from
+# annual age-stratified mortality, using calculate_e0() from lib/life_expectancy.r.
+#
+# Why this exists (issue #17, also #16):
+# When the LE source is sub-yearly (eurostat monthly LE for DEU, mortality.org
+# weekly LE for USA, ...), each published `le` value is itself an annualised
+# *single-period* estimate with strong seasonality (DEU 2025 monthly LEs swing
+# 64-72). Averaging those — which is what the default mean(le) aggregator does
+# — gives the seasonal mean of an estimator that wasn't designed to be
+# averaged, not the country's true annual LE. The only mathematically
+# defensible aggregation is to recompute LE from the year's age-stratified
+# mortality sums.
+#
+# `dd_age_input` is the priority-filtered, daily-expanded age-stratified frame
+# that feeds the period aggregation (dd_age_yearly for "year",
+# dd_age_monthly for "fluseason"/"midyear"). Returns a tibble with columns
+# (iso3c, period, le_recomputed, has_subyearly_le_source).
+recompute_period_le <- function(dd_age_input, type) {
+  empty <- tibble(
+    iso3c = character(), period = character(),
+    le_recomputed = numeric(), has_subyearly_le_source = logical()
+  )
+  if (!type %in% c("year", "fluseason", "midyear")) return(empty)
+  if (nrow(dd_age_input) == 0) return(empty)
+  required <- c("age_group", "deaths", "population", "type", "source", "n_age_groups")
+  if (!all(required %in% names(dd_age_input))) return(empty)
+
+  fun <- get(type)
+  dd <- dd_age_input |> mutate(period = as.character(fun(.data$date)))
+
+  # Per (iso3c, period): does any contributing row come from a sub-yearly LE
+  # source? If `le_source_type` was attached upstream, prefer it; otherwise
+  # fall back to the row's own `type` (which equals the LE source type in the
+  # age-stratified path, since LE is computed per source row).
+  src_col <- if ("le_source_type" %in% names(dd)) "le_source_type" else "type"
+  has_sub <- dd |>
+    group_by(.data$iso3c, .data$period) |>
+    summarise(
+      has_subyearly_le_source = any(.data[[src_col]] != 1, na.rm = TRUE),
+      .groups = "drop"
+    )
+
+  # Day-coverage per (iso3c, period, source): how many distinct days does this
+  # source contribute to the period? Used to skip sources with incomplete
+  # period coverage (e.g. CDC USA 2025 missing Feb after the anomaly filter
+  # would otherwise produce an under-estimated mortality rate / over-estimated
+  # LE if used for recomputation).
+  coverage <- dd |>
+    distinct(.data$iso3c, .data$period, .data$source, .data$date) |>
+    group_by(.data$iso3c, .data$period, .data$source) |>
+    summarise(coverage_days = n(), .groups = "drop")
+
+  period_days <- dd |>
+    distinct(.data$iso3c, .data$period, .data$date) |>
+    group_by(.data$iso3c, .data$period) |>
+    summarise(period_total_days = n(), .groups = "drop")
+
+  coverage <- coverage |>
+    left_join(period_days, by = c("iso3c", "period")) |>
+    mutate(coverage_ratio = .data$coverage_days / .data$period_total_days)
+
+  # Recompute LE per (iso3c, period, source, n_age_groups): sum daily deaths
+  # back to period totals per age group within ONE source/age-scheme combo
+  # (mixing schemes across sources would corrupt the life table), then run
+  # calculate_e0 with annualize=FALSE since deaths are already annualised.
+  per_source <- dd |>
+    group_by(.data$iso3c, .data$period, .data$source, .data$n_age_groups,
+             .data$age_group) |>
+    summarise(
+      deaths = sum(.data$deaths, na.rm = TRUE),
+      population = mean(.data$population, na.rm = TRUE),
+      .groups = "drop"
+    ) |>
+    group_by(.data$iso3c, .data$period, .data$source, .data$n_age_groups) |>
+    group_modify(~ tibble(le_recomputed = calculate_e0(.x, annualize = FALSE))) |>
+    ungroup() |>
+    left_join(coverage, by = c("iso3c", "period", "source"))
+
+  # Pick the best per (iso3c, period): require >=90% day coverage of the
+  # period (else mortality rate is biased low → LE biased high), prefer
+  # non-NA, then highest n_age_groups (matches dd_le_best's selection for
+  # sub-yearly LE).
+  recomputed <- per_source |>
+    filter(
+      !is.na(.data$le_recomputed),
+      .data$coverage_ratio >= 0.9
+    ) |>
+    group_by(.data$iso3c, .data$period) |>
+    arrange(desc(.data$n_age_groups), desc(.data$coverage_ratio)) |>
+    slice(1) |>
+    ungroup() |>
+    select("iso3c", "period", "le_recomputed")
+
+  recomputed |>
+    left_join(has_sub, by = c("iso3c", "period")) |>
+    mutate(has_subyearly_le_source = coalesce(.data$has_subyearly_le_source, FALSE))
+}
+
+# Override `le` in an aggregated period frame with the value from
+# recompute_period_le() when (a) a recomputed value is available and (b) the
+# original le was a mean of sub-yearly source values (i.e. structurally wrong
+# under the default mean(le) aggregation — see issue #17). Yearly-source LE
+# values (destatis annual etc.) are kept untouched.
+override_le_with_recomputed <- function(aggregated, recomputed) {
+  if (nrow(aggregated) == 0 || !"le" %in% names(aggregated)) return(aggregated)
+  if (nrow(recomputed) == 0) return(aggregated)
+
+  # `aggregated$date` carries the period label (numeric year, or string
+  # like "2024-2025"); coerce both sides to character for a robust join.
+  rhs <- recomputed |>
+    mutate(period_key = as.character(.data$period)) |>
+    select("period_key", "le_recomputed", "has_subyearly_le_source")
+
+  joined <- aggregated |>
+    mutate(period_key = as.character(.data$date)) |>
+    left_join(rhs, by = "period_key") |>
+    select(-"period_key")
+
+  joined |>
+    mutate(
+      le = if_else(
+        !is.na(.data$le_recomputed) & coalesce(.data$has_subyearly_le_source, FALSE),
+        round(.data$le_recomputed, 2),
+        .data$le
+      )
+    ) |>
+    select(-any_of(c("le_recomputed", "has_subyearly_le_source")))
+}
+
 # Keep head/tail periods only when they have enough daily rows to be considered
 # complete. `n` is the standard threshold; `n_iso_week` (optional) is a relaxed
 # threshold that applies when every row of the head/tail period was sourced
@@ -25,7 +243,6 @@ filter_by_complete_temp_values <- function(data, fun_name, n, n_iso_week = n) {
       group_modify(~ if (keep_period(.x)) .x else .x[0, ]) |>
       ungroup()
   }
-
   start <- data |>
     filter(.data[[fun_name]] == head(data[[fun_name]], n = 1)) |>
     filter_edge()
