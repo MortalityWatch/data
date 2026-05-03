@@ -127,7 +127,7 @@ process_country <- function(df) {
       group_by(iso3c, date, type, source) |>
       slice(1) |>
       ungroup() |>
-      select(iso3c, date, type, source, n_age_groups, le)
+      select(iso3c, date, type, source, n_age_groups, le, le_unavailable_reason)
 
     # Pick best LE per date (prefer non-NA with highest n_age_groups)
     # This allows using eurostat LE even when destatis is preferred for deaths.
@@ -135,13 +135,39 @@ process_country <- function(df) {
     # `le_source_type` so downstream period aggregation can detect when the
     # default mean(le) would be averaging sub-yearly single-period LE values
     # (issue #17 / #16).
-    dd_le_best <- dd_le_e0 |>
+    # When *no* source can compute LE for this jurisdiction/date (e.g.
+    # Brandenburg only publishes 0-64 as the first bucket — see issue #15),
+    # all candidates have `le = NA`. In that case we still want to surface a
+    # row so the unavailability reason flows through to consumers; without
+    # this branch the prior `filter(!is.na(le))` would drop them all and the
+    # frontend would see no row at all.
+    dd_le_best_computed <- dd_le_e0 |>
       filter(!is.na(le)) |>
       group_by(iso3c, date) |>
       arrange(desc(n_age_groups)) |>
       slice(1) |>
       ungroup() |>
-      select(iso3c, date, le, source_le = source, le_source_type = type)
+      select(
+        iso3c, date, le, le_unavailable_reason,
+        source_le = source, le_source_type = type
+      )
+
+    dd_le_best_unavailable <- dd_le_e0 |>
+      anti_join(dd_le_best_computed, by = c("iso3c", "date")) |>
+      filter(!is.na(le_unavailable_reason)) |>
+      group_by(iso3c, date) |>
+      arrange(desc(n_age_groups)) |>
+      slice(1) |>
+      ungroup() |>
+      select(
+        iso3c, date, le, le_unavailable_reason,
+        source_le = source, le_source_type = type
+      )
+
+    dd_le_best <- bind_rows(dd_le_best_computed, dd_le_best_unavailable) |>
+      select(
+        iso3c, date, le, le_unavailable_reason, source_le, le_source_type
+      )
 
     # Merge best LE into ASMR data (not requiring source match)
     dd_asmr <- dd_asmr |>
@@ -150,7 +176,10 @@ process_country <- function(df) {
     # Merge LE into age-specific data (for individual age group outputs)
     dd_age <- dd_age |>
       left_join(
-        dd_le_all |> select(iso3c, date, type, source, age_group, le),
+        dd_le_all |>
+          select(
+            iso3c, date, type, source, age_group, le, le_unavailable_reason
+          ),
         by = c("iso3c", "date", "type", "source", "age_group")
       ) |>
       # Attach the LE-source type so age-level outputs can also recompute

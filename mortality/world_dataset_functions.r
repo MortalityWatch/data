@@ -259,6 +259,22 @@ filter_by_complete_temp_values <- function(data, fun_name, n, n_iso_week = n) {
     group_by(across(all_of(c("iso3c", fun_name))))
 }
 
+# Pick the most common non-NA reason (first wins on ties). Returns
+# `NA_character_` when there are no reasons. Used to propagate
+# `le_unavailable_reason` through aggregations where multiple per-period
+# rows collapse into one.
+most_common_reason <- function(x) {
+  if (is.null(x)) {
+    return(NA_character_)
+  }
+  vals <- x[!is.na(x)]
+  if (length(vals) == 0) {
+    return(NA_character_)
+  }
+  tab <- sort(table(vals), decreasing = TRUE)
+  names(tab)[1]
+}
+
 aggregate_data <- function(data, type) {
   # Filter ends. For "year", allow ISO-weekly-sourced years (type == 3) to
   # pass at >= 51 weeks (357 days) since ISO weeks cannot cover all 365
@@ -274,6 +290,7 @@ aggregate_data <- function(data, type) {
     "midyear" = filter_by_complete_temp_values(data, type, 365)
   )
   has_le <- "le" %in% names(data)
+  has_le_reason <- "le_unavailable_reason" %in% names(data)
 
   if ("cmr" %in% names(data)) {
     if (has_le) {
@@ -283,12 +300,32 @@ aggregate_data <- function(data, type) {
           population = round(mean(.data$population)),
           cmr = round(sum_if_not_empty(.data$cmr), digits = 1),
           le = round(mean(.data$le, na.rm = TRUE), 2),
+          le_unavailable_reason = if (has_le_reason) {
+            most_common_reason(.data$le_unavailable_reason)
+          } else {
+            NA_character_
+          },
           type = toString(unique(.data$type)),
           source = toString(unique(.data$source)),
           .groups = "drop"
         )
       if (all(is.na(result$le) | is.nan(result$le))) {
+        # LE itself is uncomputable for every aggregated row; drop the column
+        # but keep `le_unavailable_reason` so the frontend can still explain
+        # why. If no reason was carried through either, drop it too.
         result <- result |> select(-le)
+        if (all(is.na(result$le_unavailable_reason))) {
+          result <- result |> select(-le_unavailable_reason)
+        }
+      } else {
+        # LE is at least partially computable; the reason column is only
+        # meaningful when LE is NA, so blank it out elsewhere.
+        result <- result |>
+          mutate(
+            le_unavailable_reason = ifelse(
+              is.na(.data$le), .data$le_unavailable_reason, NA_character_
+            )
+          )
       }
     } else {
       result <- result |>
@@ -313,12 +350,30 @@ aggregate_data <- function(data, type) {
           asmr_usa = round(sum_if_not_empty(.data$asmr_usa), digits = 1),
           asmr_country = round(sum_if_not_empty(.data$asmr_country), digits = 1),
           le = round(mean(.data$le, na.rm = TRUE), 2),
+          le_unavailable_reason = if (has_le_reason) {
+            most_common_reason(.data$le_unavailable_reason)
+          } else {
+            NA_character_
+          },
           source_asmr = toString(unique(.data$source)),
           source_le = if (has_source_le) toString(unique(.data$source_le)) else NA_character_,
           .groups = "drop"
         )
       if (all(is.na(result$le) | is.nan(result$le))) {
+        # See note in the cmr branch: keep `le_unavailable_reason` so the
+        # frontend can still explain unavailability; drop only when nothing
+        # was carried through.
         result <- result |> select(-le, -source_le)
+        if (all(is.na(result$le_unavailable_reason))) {
+          result <- result |> select(-le_unavailable_reason)
+        }
+      } else {
+        result <- result |>
+          mutate(
+            le_unavailable_reason = ifelse(
+              is.na(.data$le), .data$le_unavailable_reason, NA_character_
+            )
+          )
       }
     } else {
       result <- result |>

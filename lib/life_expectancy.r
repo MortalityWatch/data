@@ -332,18 +332,29 @@ parse_age_groups_for_le <- function(age_groups) {
 #'   Deaths should be daily counts (annual deaths / 365) when annualize=TRUE.
 #' @param annualize Logical: if TRUE (default), multiply mortality rates by 365
 #'   to convert daily rates to annual rates. Set to FALSE for annual data.
-#' @return Data frame with age_group and le columns
+#' @return Data frame with age_group, le, and le_unavailable_reason columns.
+#'   `le_unavailable_reason` is `NA_character_` when LE is computable, otherwise
+#'   a short machine-readable string explaining why LE is unavailable (e.g.
+#'   "first_age_group_too_broad" when the source's first age bucket is wider
+#'   than `MAX_FIRST_AGE_GROUP_WIDTH`). Frontends can read this column to
+#'   render an explanation instead of silently disabling the metric.
 calculate_le_all_ages <- function(df, annualize = TRUE) {
+  empty_result <- tibble(
+    age_group = character(),
+    le = numeric(),
+    le_unavailable_reason = character()
+  )
+
   # Need at least some data
   if (nrow(df) == 0) {
-    return(tibble(age_group = character(), le = numeric()))
+    return(empty_result)
   }
 
   # Parse age groups to get numeric starts
   age_info <- parse_age_groups_for_le(df$age_group)
 
   if (is.null(age_info) || length(age_info$ages) < 2) {
-    return(tibble(age_group = character(), le = numeric()))
+    return(empty_result)
   }
 
   # Calculate mortality rates (deaths per person, NOT per 100k)
@@ -354,7 +365,7 @@ calculate_le_all_ages <- function(df, annualize = TRUE) {
 
   # Check if all mortality rates are zero (no deaths)
   if (all(nMx == 0)) {
-    return(tibble(age_group = character(), le = numeric()))
+    return(empty_result)
   }
 
   # Annualize daily mortality rates to get annual rates for life table
@@ -370,9 +381,16 @@ calculate_le_all_ages <- function(df, annualize = TRUE) {
   age_groups_sorted <- df$age_group[ord]
 
   # Skip if first age group is too broad for reliable LE calculation
-  # (e.g., 0-24, 0-44, 0-64 from some data sources)
+  # (e.g., 0-24, 0-44, 0-64 from some data sources). Return NA `le` plus a
+  # reason on every age row so downstream consumers (and ultimately the
+  # frontend) can explain *why* LE is unavailable instead of silently
+  # dropping the metric. See issue #15 / closed PR #20 for context.
   if (ages[1] == 0 && !is.na(AgeInt[1]) && AgeInt[1] > MAX_FIRST_AGE_GROUP_WIDTH) {
-    return(tibble(age_group = character(), le = numeric()))
+    return(tibble(
+      age_group = age_groups_sorted,
+      le = NA_real_,
+      le_unavailable_reason = "first_age_group_too_broad"
+    ))
   }
 
   # Build life table
@@ -382,7 +400,7 @@ calculate_le_all_ages <- function(df, annualize = TRUE) {
   )
 
   if (is.null(lt)) {
-    return(tibble(age_group = character(), le = numeric()))
+    return(empty_result)
   }
 
   # Return ex for all ages
@@ -391,6 +409,7 @@ calculate_le_all_ages <- function(df, annualize = TRUE) {
 
   tibble(
     age_group = age_groups_sorted,
-    le = round(ex, 2)
+    le = round(ex, 2),
+    le_unavailable_reason = NA_character_
   )
 }
