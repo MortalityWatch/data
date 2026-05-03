@@ -18,7 +18,6 @@ jsonlite
 lubridate
 parallel
 progressr
-pryr
 purrr
 quantmod
 readr
