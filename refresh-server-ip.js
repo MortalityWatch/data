@@ -54,39 +54,38 @@ function main() {
   const hostname = getRuntimeHostname();
   const ip = getRuntimeIp();
 
-  let header;
   try {
+    let header;
     header = runStorageGet('global/servers');
-  }
-  catch (error) {
-    console.warn(`[refresh-server-ip] Skipping server IP refresh: ${error.message}`);
-    return;
-  }
 
-  const firstPage = Number.isInteger(header.first_page) ? header.first_page : 0;
-  const lastPage = Number.isInteger(header.last_page) ? header.last_page : 0;
+    const firstPage = Number.isInteger(header.first_page) ? header.first_page : 0;
+    const lastPage = Number.isInteger(header.last_page) ? header.last_page : 0;
 
-  for (let page = firstPage; page <= lastPage; page += 1) {
-    const key = `global/servers/${page}`;
-    const pageData = runStorageGet(key);
+    for (let page = firstPage; page <= lastPage; page += 1) {
+      const key = `global/servers/${page}`;
+      const pageData = runStorageGet(key);
 
-    if (!Array.isArray(pageData.items)) continue;
+      if (!Array.isArray(pageData.items)) continue;
 
-    const server = pageData.items.find((item) => item && item.hostname === hostname);
-    if (!server) continue;
+      const server = pageData.items.find((item) => item && item.hostname === hostname);
+      if (!server) continue;
 
-    if (server.ip === ip) {
-      console.log(`[refresh-server-ip] Server record already current for ${hostname} -> ${ip}`);
+      if (server.ip === ip) {
+        console.log(`[refresh-server-ip] Server record already current for ${hostname} -> ${ip}`);
+        return;
+      }
+
+      server.ip = ip;
+      runStoragePut(key, pageData);
+      console.log(`[refresh-server-ip] Updated server record for ${hostname}: ${key} -> ${ip}`);
       return;
     }
 
-    server.ip = ip;
-    runStoragePut(key, pageData);
-    console.log(`[refresh-server-ip] Updated server record for ${hostname}: ${key} -> ${ip}`);
-    return;
+    console.warn(`[refresh-server-ip] No server record found for hostname ${hostname}; leaving storage unchanged`);
   }
-
-  console.warn(`[refresh-server-ip] No server record found for hostname ${hostname}; leaving storage unchanged`);
+  catch (error) {
+    console.warn(`[refresh-server-ip] Skipping server IP refresh for ${hostname}: ${error.message}`);
+  }
 }
 
 main();
