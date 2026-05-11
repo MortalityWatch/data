@@ -1,15 +1,12 @@
-#!/bin/sh
+#!/usr/bin/env bash
+set -euo pipefail
 
-# Only run setup when setup needs to be done
-if [ ! -f /opt/cronicle/.setup_done ]; then
-  /opt/cronicle/bin/control.sh setup
-  mv /opt/cronicle/config.json /opt/cronicle/conf/config.json
+# Ensure storage exists before we try to inspect or patch cluster metadata.
+/opt/cronicle/bin/control.sh setup >/dev/null 2>&1 || true
 
-  touch /opt/cronicle/.setup_done
-fi
+# Cronicle stores manager candidates by hostname+IP. In Dokku the container IP
+# changes across deploys, so refresh the persisted IP for the fixed legacy
+# hostname before manager election runs.
+node /opt/cronicle/refresh-server-ip.js
 
-service mariadb start
-mysql -e "set password = password('');"
-
-# Run cronicle
-node /opt/cronicle/lib/main.js
+exec /opt/cronicle/bin/manager "$@"

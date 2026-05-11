@@ -71,6 +71,11 @@ COPY openssl.cnf .
 RUN chown ubuntu:ubuntu /opt/cronicle/openssl.cnf
 ENV OPENSSL_CONF=/opt/cronicle/openssl.cnf
 
+# Local startup helpers
+COPY entrypoint.sh refresh-server-ip.js .
+RUN chmod +x /opt/cronicle/entrypoint.sh /opt/cronicle/refresh-server-ip.js && \
+  chown ubuntu:ubuntu /opt/cronicle/entrypoint.sh /opt/cronicle/refresh-server-ip.js
+
 # Install MinIO Client
 RUN mkdir -p minio-binaries && \ 
 curl -fsSL https://dl.min.io/client/mc/release/linux-amd64/mc \ 
@@ -87,4 +92,4 @@ EXPOSE 3012
 
 # Set default command
 ENTRYPOINT ["/usr/bin/tini", "-s", "--"]
-CMD ["manager"]
+CMD ["./entrypoint.sh"]
