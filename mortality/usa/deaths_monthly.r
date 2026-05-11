@@ -87,15 +87,38 @@ get_max_year <- function() {
 }
 
 max_year <- get_max_year()
+years <- 1999:max_year
+
+assert_files_exist(
+  file.path("../wonder_dl/data_wonder/monthly/all", paste0(years, ".txt")),
+  "CDC WONDER monthly totals input"
+)
+
+monthly_age_files <- expand.grid(
+  year = years,
+  state = state_ids,
+  stringsAsFactors = FALSE
+) |>
+  mutate(path = file.path(
+    "../wonder_dl/data_wonder/monthly/age",
+    year,
+    paste0(state, ".txt")
+  )) |>
+  pull(path)
+
+assert_files_exist(
+  monthly_age_files,
+  "CDC WONDER monthly age input"
+)
 
 # Get Totals per state/month
-for (year in 1999:max_year) {
+for (year in years) {
   df_all <- parse_totals(year)
   result_1y <- bind_rows(result_1y, df_all)
 }
 
 # Age groups per state/month
-for (year in 1999:max_year) {
+for (year in years) {
   print(paste0("Processing ", year))
 
   df_us <- get_csv(year, "all")

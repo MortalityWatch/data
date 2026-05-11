@@ -366,6 +366,30 @@ suppress_warnings <- function(.expr, .f, ...) {
   )
 }
 
+assert_files_exist <- function(paths, context, max_display = 10) {
+  missing <- unique(paths[!file.exists(paths)])
+  if (length(missing) == 0) {
+    return(invisible(paths))
+  }
+
+  shown <- head(missing, max_display)
+  extra_count <- length(missing) - length(shown)
+  extra <- if (extra_count > 0) {
+    paste0("\n- ... and ", extra_count, " more")
+  } else {
+    ""
+  }
+
+  stop(
+    paste0(
+      context, " is missing ", length(missing), " file(s):\n- ",
+      paste(shown, collapse = "\n- "),
+      extra
+    ),
+    call. = FALSE
+  )
+}
+
 # Forecast n+5
 forecast_population <- function(data) {
   fc_n <- 5
