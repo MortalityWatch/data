@@ -57,7 +57,8 @@ df <- rbind(result1, result2) |>
   ) |>
   filter(!is.na(deaths)) |>
   arrange(year, jurisdiction, age_group, week) |>
-  distinct(jurisdiction, year, week, age_group, .keep_all = TRUE)
+  distinct(jurisdiction, year, week, age_group, .keep_all = TRUE) |>
+  select(jurisdiction, year, age_group, week, deaths)  # Explicitly select only valid columns
 
 date <- now() %m-% weeks(2)
 y <- year(date)
