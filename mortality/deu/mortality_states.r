@@ -31,6 +31,7 @@ summarize_age_groups <- function(x) {
 
 de_states <- as_tibble(read.csv("./data_static/deu_states_iso3c.csv"))
 df <- read_remote("deaths/deu/deaths.csv") |>
+  select(jurisdiction, year, age_group, week, deaths) |>  # Explicitly select columns to filter out any empty ones
   inner_join(de_states, by = "jurisdiction")
 rm(de_states)
 
