@@ -101,7 +101,7 @@ df_year <- deaths_raw %>%
   group_by(date, age_group) |>
   summarize(deaths = sum(deaths), .groups = "drop") |>
   filter(!is.na(age_group)) |>
-  filter(date != "")  # Remove empty column names from Genesis CSV
+  filter(date != "" & !grepl("^\\.\\.\\.", date))  # Remove empty column names from Genesis CSV
 df_year$iso3c <- "DEU"
 df_year$type <- 1
 df_year$date <- date(sprintf("%s-01-01", df_year$date))
