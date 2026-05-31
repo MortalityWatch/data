@@ -30,8 +30,20 @@ summarize_age_groups <- function(x) {
 }
 
 de_states <- as_tibble(read.csv("./data_static/deu_states_iso3c.csv"))
-df <- read_remote("deaths/deu/deaths.csv") |>
-  select(jurisdiction, year, age_group, week, deaths) |>  # Explicitly select columns to filter out any empty ones
+# Read CSV with col_select to only read specific columns, avoiding any empty columns
+url <- paste0(
+  "https://s3.mortality.watch/data/deaths/deu/deaths.csv",
+  "?cachebust=", as.numeric(Sys.time())
+)
+message("Reading remote file: ", url)
+response <- GET(url)
+stop_for_status(response)
+content_text <- content(response, "text")
+df <- read_csv(
+  I(content_text),
+  col_select = c(jurisdiction, year, age_group, week, deaths),
+  show_col_types = FALSE
+) |>
   inner_join(de_states, by = "jurisdiction")
 rm(de_states)
 
