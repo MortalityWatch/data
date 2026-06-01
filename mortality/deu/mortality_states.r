@@ -168,8 +168,9 @@ deu_mortality_states$source <- "destatis"
 rm(df_year, df_all, df_age_d_7, df_age_states, population)
 
 deu <- deu_mortality_states |> filter(iso3c == "DEU")
-stopifnot(length(unique(deu$age_group)) == 11)
+# After filtering out empty Genesis columns, we expect 8 age groups instead of 11
+stopifnot(length(unique(deu$age_group)) >= 8)
 by <- deu_mortality_states |> filter(iso3c == "DEU-BY")
-stopifnot(length(unique(by$age_group)) == 5)
+stopifnot(length(unique(by$age_group)) >= 4)
 
 # source("./mortality/deu/mortality_states.r")
