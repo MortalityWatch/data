@@ -135,18 +135,22 @@ recompute_period_le <- function(dd_age_input, type) {
   # would otherwise produce an under-estimated mortality rate / over-estimated
   # LE if used for recomputation).
   coverage <- dd |>
-    distinct(.data$iso3c, .data$period, .data$source, .data$date) |>
+    distinct(.data$iso3c, .data$period, .data$source, .data$type, .data$date) |>
     group_by(.data$iso3c, .data$period, .data$source) |>
-    summarise(coverage_days = n(), .groups = "drop")
-
-  period_days <- dd |>
-    distinct(.data$iso3c, .data$period, .data$date) |>
-    group_by(.data$iso3c, .data$period) |>
-    summarise(period_total_days = n(), .groups = "drop")
+    summarise(
+      coverage_days = n(),
+      source_type = max(.data$type, na.rm = TRUE),
+      .groups = "drop"
+    )
 
   coverage <- coverage |>
-    left_join(period_days, by = c("iso3c", "period")) |>
-    mutate(coverage_ratio = .data$coverage_days / .data$period_total_days)
+    mutate(
+      required_coverage_days = case_when(
+        .env$type == "year" & .data$source_type == 3 ~ 357,
+        TRUE ~ 365
+      ),
+      coverage_ratio = .data$coverage_days / .data$required_coverage_days
+    )
 
   # Recompute LE per (iso3c, period, source, n_age_groups): sum daily deaths
   # back to period totals per age group within ONE source/age-scheme combo
