@@ -4,18 +4,19 @@ parse_totals <- function(year) {
   df <- suppress_warnings(
     read_delim(paste0(
       "../wonder_dl/data_wonder/monthly/all/", year, ".txt"
-    ), delim = "\t"), "One or more parsing issues"
+    ), delim = "\t", col_types = cols(.default = "c")),
+    "One or more parsing issues"
   ) |>
-    rowwise() |>
     mutate(
       deaths = as_integer(Deaths),
       year = as_integer(left(`Month Code`, 4)),
-      month = as_integer(right(`Month Code`, 2)),
-      id = sprintf(
-        "%02s",
-        ifelse(year > 2020, `Residence State Code`, `State Code`)
-      )
+      month = as_integer(right(`Month Code`, 2))
     ) |>
+    rename_with(
+      ~ "state_code",
+      any_of(c("Residence State Code", "State Code"))
+    ) |>
+    mutate(id = sprintf("%02s", state_code)) |>
     mutate(date = make_yearmonth(year, month)) |>
     filter(!is.na(date)) |>
     inner_join(us_states_iso3c,
