@@ -7,16 +7,17 @@ parse_totals <- function(year) {
     ), delim = "\t", col_types = cols(.default = "c")),
     "One or more parsing issues"
   ) |>
-    mutate(
-      deaths = as_integer(Deaths),
-      year = as_integer(left(`Month Code`, 4)),
-      month = as_integer(right(`Month Code`, 2))
-    ) |>
     rename_with(
       ~ "state_code",
       any_of(c("Residence State Code", "State Code"))
     ) |>
-    mutate(id = sprintf("%02s", state_code)) |>
+    rowwise() |>
+    mutate(
+      deaths = as_integer(Deaths),
+      year = as_integer(left(`Month Code`, 4)),
+      month = as_integer(right(`Month Code`, 2)),
+      id = sprintf("%02s", state_code)
+    ) |>
     mutate(date = make_yearmonth(year, month)) |>
     filter(!is.na(date)) |>
     inner_join(us_states_iso3c,
