@@ -1,16 +1,27 @@
 source("lib/common.r")
 
 parse_totals <- function(year) {
-  df <- suppress_warnings(
+  df_raw <- suppress_warnings(
     read_delim(paste0(
       "../wonder_dl/data_wonder/monthly/all/", year, ".txt"
     ), delim = "\t", col_types = cols(.default = "c")),
     "One or more parsing issues"
-  ) |>
-    rename_with(
-      ~ "state_code",
-      any_of(c("Residence State Code", "State Code"))
-    ) |>
+  )
+  state_code_column <- intersect(
+    c("Residence State Code", "State Code"),
+    names(df_raw)
+  )[1]
+  if (is.na(state_code_column)) {
+    stop(paste0(
+      "Missing state code column in monthly totals file for ",
+      year,
+      ". Columns: ",
+      paste(names(df_raw), collapse = ", ")
+    ))
+  }
+  df_raw$state_code <- df_raw[[state_code_column]]
+
+  df <- df_raw |>
     rowwise() |>
     mutate(
       deaths = as_integer(Deaths),
