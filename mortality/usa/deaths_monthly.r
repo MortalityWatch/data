@@ -7,10 +7,10 @@ parse_totals <- function(year) {
     ), delim = "\t", col_types = cols(.default = "c")),
     "One or more parsing issues"
   )
-  state_code_column <- intersect(
-    c("Residence State Code", "State Code"),
-    names(df_raw)
-  )[1]
+  state_code_column <- names(df_raw)[
+    names(df_raw) == "State Code" |
+      grepl("^Residence State.* Code$", names(df_raw))
+  ][1]
   if (is.na(state_code_column)) {
     stop(paste0(
       "Missing state code column in monthly totals file for ",
