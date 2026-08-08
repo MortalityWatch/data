@@ -149,7 +149,7 @@ process_country <- function(df) {
       ungroup() |>
       select(
         iso3c, date, le, le_unavailable_reason,
-        source_le = source, le_source_type = type
+        source_le = source, le_source_type = type, n_age_groups_le = n_age_groups
       )
 
     dd_le_best_unavailable <- dd_le_e0 |>
@@ -161,12 +161,13 @@ process_country <- function(df) {
       ungroup() |>
       select(
         iso3c, date, le, le_unavailable_reason,
-        source_le = source, le_source_type = type
+        source_le = source, le_source_type = type, n_age_groups_le = n_age_groups
       )
 
     dd_le_best <- bind_rows(dd_le_best_computed, dd_le_best_unavailable) |>
       select(
-        iso3c, date, le, le_unavailable_reason, source_le, le_source_type
+        iso3c, date, le, le_unavailable_reason,
+        source_le, le_source_type, n_age_groups_le
       )
 
     # Merge best LE into ASMR data (not requiring source match)

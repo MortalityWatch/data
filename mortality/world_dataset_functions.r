@@ -309,6 +309,7 @@ aggregate_data <- function(data, type) {
           } else {
             NA_character_
           },
+          n_age_groups_le = if ("n_age_groups_le" %in% names(data)) round(mean(.data$n_age_groups_le, na.rm = TRUE)) else if ("n_age_groups" %in% names(data)) round(mean(.data$n_age_groups, na.rm = TRUE)) else NA_real_,
           type = toString(unique(.data$type)),
           source = toString(unique(.data$source)),
           .groups = "drop"
@@ -359,6 +360,7 @@ aggregate_data <- function(data, type) {
           } else {
             NA_character_
           },
+          n_age_groups_le = if ("n_age_groups_le" %in% names(data)) round(mean(.data$n_age_groups_le, na.rm = TRUE)) else if ("n_age_groups" %in% names(data)) round(mean(.data$n_age_groups, na.rm = TRUE)) else NA_real_,
           source_asmr = toString(unique(.data$source)),
           source_le = if (has_source_le) toString(unique(.data$source_le)) else NA_character_,
           .groups = "drop"
@@ -469,6 +471,15 @@ round_x <- function(data, col_name, digits = 0) {
     )
 }
 
+# LE bin-bias correction (years) based on validation against single-age reference.
+# Applied only to le_adj (sub-yearly adjusted LE), keeping raw le unchanged.
+get_le_bin_bias <- function(n_age_groups_le) {
+  ifelse(
+    is.na(n_age_groups_le), 0,
+    ifelse(n_age_groups_le == 19, 0.0551, ifelse(n_age_groups_le == 11, 0.0101, 0))
+  )
+}
+
 summarize_data_all <- function(dd_all, dd_asmr, type) {
   a <- summarize_data_by_time(dd_all, type)
   if (nrow(dd_asmr) == 0) {
@@ -549,7 +560,12 @@ smooth_le_stl <- function(df, type) {
   # Seasonally adjusted = trend + residual (removes seasonal artifact only)
   trend <- as.numeric(stl_result$time.series[, "trend"])
   residual <- as.numeric(stl_result$time.series[, "remainder"])
-  df$le_adj <- round(trend + residual, 2)
+  df$le_adj <- trend + residual
+
+  # Blend bin-structure correction into adjusted LE (default display path).
+  # If n_age_groups_le is unavailable, no correction is applied.
+  n_le <- if ("n_age_groups_le" %in% names(df)) df$n_age_groups_le else NA_real_
+  df$le_adj <- round(df$le_adj - get_le_bin_bias(n_le), 2)
 
   df
 }
@@ -566,6 +582,49 @@ fill_gaps_na <- function(df) {
 }
 
 save_info <- function(df, upload) {
+  parse_age_group_start <- function(age_group) {
+    ag <- trimws(age_group)
+    m <- regmatches(ag, regexpr("^[0-9]+", ag))
+    if (length(m) == 0 || m == "") {
+      return(Inf)
+    }
+    as.numeric(m)
+  }
+
+  canonicalize_age_groups <- function(age_groups) {
+    ag <- unique(trimws(age_groups))
+    ag <- ag[!is.na(ag) & ag != ""]
+    has_all <- any(tolower(ag) == "all")
+    bins <- ag[tolower(ag) != "all"]
+
+    if (length(bins) > 0) {
+      bins <- bins[order(vapply(bins, parse_age_group_start, numeric(1)), bins)]
+    }
+
+    age_groups_bins <- paste(bins, collapse = ", ")
+    age_groups_canonical <- if (has_all) {
+      if (nzchar(age_groups_bins)) {
+        paste0("all, ", age_groups_bins)
+      } else {
+        "all"
+      }
+    } else {
+      age_groups_bins
+    }
+    bin_schema_id <- if (length(bins) == 0) {
+      "all"
+    } else {
+      gsub("[^0-9a-z]+", "_", tolower(age_groups_bins))
+    }
+
+    list(
+      age_groups_bins = age_groups_bins,
+      age_groups_canonical = age_groups_canonical,
+      n_age_groups_meta = length(bins),
+      bin_schema_id = bin_schema_id
+    )
+  }
+
   result <- tibble()
   for (code in unique(df$iso3c)) {
     df_country <- df |> filter(.data$iso3c == code)
@@ -573,6 +632,7 @@ save_info <- function(df, upload) {
       df_country_type <- df_country |> filter(.data$type == t)
       for (s in unique(df_country_type$source)) {
         df_country_type_source <- df_country_type |> filter(.data$source == s)
+        age_meta <- canonicalize_age_groups(unique(df_country_type_source$age_group))
         result <- rbind(
           result,
           tibble(
@@ -585,7 +645,12 @@ save_info <- function(df, upload) {
             age_groups = paste(
               unique(df_country_type_source$age_group),
               collapse = ", "
-            )
+            ),
+            age_groups_bins = age_meta$age_groups_bins,
+            age_groups_canonical = age_meta$age_groups_canonical,
+            n_age_groups_meta = age_meta$n_age_groups_meta,
+            bin_schema_id = age_meta$bin_schema_id,
+            le_bin_bias_adj_years = get_le_bin_bias(age_meta$n_age_groups_meta)
           )
         )
       }
