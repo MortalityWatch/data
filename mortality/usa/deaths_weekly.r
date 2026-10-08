@@ -1,4 +1,5 @@
 source("lib/common.r")
+source("lib/wonder_weekly.r")
 options(warn = 1)
 
 parse_data <- function(df, jurisdiction_column, age_group) {
@@ -8,8 +9,7 @@ parse_data <- function(df, jurisdiction_column, age_group) {
       week = as.numeric(right(`MMWR Week Code`, 2))
     ) |>
     filter(!is.na(year), !is.na(week), week != 99) |>
-    rowwise() |>
-    mutate(date = make_yearweek(year, week), Deaths = as_integer(Deaths))
+    mutate(date = make_yearweek(year, week), Deaths = parse_weekly_deaths(Deaths))
   if (nchar(jurisdiction_column) == 0) {
     df <- df |>
       select("date", "year", "week", "Deaths") |>
@@ -33,9 +33,11 @@ parse_data <- function(df, jurisdiction_column, age_group) {
 get_csv <- function(j, a) {
   files <- Sys.glob(paste0("../wonder_dl/data_wonder/weekly/", j, "_", a, "_*.txt"))
   df <- bind_rows(lapply(files, function(f) {
-    suppressWarnings(
+    export <- suppressWarnings(
       read_delim(f, delim = "\t", col_types = cols(.default = "c"))
     )
+    if (j == "usa-state") export <- normalize_weekly_state_column(export)
+    export
   }))
   parse_data(df, ifelse(j == "usa", "", "Residence State"), a)
 }
