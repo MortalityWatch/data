@@ -27,6 +27,14 @@ Set it to `0` to reuse existing monthly files (including their provisional
 counts); provisional weekly files still refresh. `SKIP_WONDER_FETCH=1` skips
 downloads but never bypasses weekly input validation.
 
+The job sources `wonder_dl/scripts/provisional-years.sh` to detect the last final
+year from CDC's Current Final section and determine the provisional range.
+Update the sibling downloader to include this script before deploying this
+runner. Remove fixed `WONDER_MIN_YEAR` assignments from Cronicle to enable
+detection; an explicit value remains an override. The detected policy is shared
+by download and publication validation. Newly finalized years are refreshed
+before the downloader marks them safe to cache.
+
 See https://www.mortality.watch/ for the frontend.
 
 # Configuration
