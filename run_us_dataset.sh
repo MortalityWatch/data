@@ -14,6 +14,11 @@ if ! command -v node >/dev/null 2>&1; then
   echo "Node.js is required to validate weekly WONDER inputs before publication." >&2
   exit 1
 fi
+if [ ! -f ../wonder_dl/scripts/provisional-years.sh ]; then
+  echo "Update the sibling wonder_dl checkout to include scripts/provisional-years.sh before publishing." >&2
+  exit 1
+fi
+source ../wonder_dl/scripts/provisional-years.sh
 
 # Fail before the first R script uploads anything, including when fetch is skipped.
 node "$wonder_validator"
