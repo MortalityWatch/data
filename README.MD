@@ -12,6 +12,21 @@ Sample usage:
 Rscript update_datasets.r
 ```
 
+For US CDC WONDER imports, clone `USMortality/wonder_dl` beside this repository
+and run `./run_us_dataset.sh`. The runner resolves its working directory from
+its own location, so it can be invoked from any directory. Both validation and
+the existing R importers use the sibling `../wonder_dl` checkout; changing only
+the validator path would validate different files from those being imported.
+Node.js and the refresh/validation scripts from `USMortality/wonder_dl` PR #8
+must be installed before running the US pipeline.
+
+Use `cronicle_us_dataset.sh` as the replacement Cronicle job body after deploying
+both repositories. `FULL_WONDER_REFRESH=1` deliberately preserves the original
+job's default of refreshing monthly files for the configured provisional years.
+Set it to `0` to reuse existing monthly files (including their provisional
+counts); provisional weekly files still refresh. `SKIP_WONDER_FETCH=1` skips
+downloads but never bypasses weekly input validation.
+
 See https://www.mortality.watch/ for the frontend.
 
 # Configuration
